@@ -24,6 +24,12 @@ function route_(p) {
   if (a === 'ping') return { status: 'ok', market: M.id };
   if (a === 'setup') return setup_();
   if (a === 'health') return state_(true);
+  if (a === 'recalc') {
+    var cc = CacheService.getScriptCache();
+    if (cc.get('rc')) return { status: 'wait', message: 'انتظر دقيقة قبل إعادة الحساب' };
+    cc.put('rc', '1', 60);
+    return state_(false, true);
+  }
   if (a === 'config') return { name: M.name, bizImage: img_() };
   return state_(false);
 }
@@ -109,19 +115,20 @@ function snap_(nav) {
   return { NAV: nav.toFixed(2), change: ch.toFixed(2), changePercent: pct.toFixed(2), dayHigh: hi.toFixed(2), dayLow: lo.toFixed(2), volatility: vol.toFixed(2) };
 }
 
-function state_(healthOnly) {
+function state_(healthOnly, force) {
   var lock = LockService.getScriptLock(), got = false;
-  try { got = lock.tryLock(8000); } catch (e) {}
+  try { got = lock.tryLock(force ? 20000 : 8000); } catch (e) {}
   var cache = CacheService.getScriptCache(), key = healthOnly ? 'h' : 'i', hit = cache.get(key);
-  if (hit && !healthOnly) return JSON.parse(hit);
+  if (hit && !healthOnly && !force) return JSON.parse(hit);
   var rows;
-  try { rows = refresh_(got ? BUDGET_MS : 0); } finally { if (got) lock.releaseLock(); }
+  try { rows = refresh_(got ? (force ? 120000 : BUDGET_MS) : 0); } finally { if (got) lock.releaseLock(); }
   var ok = rows.filter(function (r) { return r[4] === 'yes'; }).length, orders = 0;
   rows.forEach(function (r) { orders += Number(r[2]) || 0; });
   var calc = nav_(rows), nav = calc.nav, res;
   if (healthOnly) return { status: 'ok', market: M.id, businesses: rows.length, readable: ok, orders: orders };
   res = { market: M.name, image: img_(), index: snap_(nav), businesses: rows.length, orders: orders, timestamp: new Date().toISOString() };
   cache.put('i', JSON.stringify(res), 240);
+  if (force) { res.status = 'ok'; res.readable = ok; }
   return res;
 }
 
